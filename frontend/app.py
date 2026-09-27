@@ -11,9 +11,12 @@ from debate_arena.config.settings import ASSEMBLYAI_API_KEY
 from debate_arena.debate.debate_report import DebateReport
 from debate_arena.debate.engine import DebateEngine
 from debate_arena.debate.state import DebateState
+
 try:
     from debate_arena.voice.voice_agent import VoiceAgent
+
     LOCAL_VOICE_AVAILABLE = True
+
 except (ImportError, ModuleNotFoundError):
     VoiceAgent = None
     LOCAL_VOICE_AVAILABLE = False
@@ -21,9 +24,11 @@ except (ImportError, ModuleNotFoundError):
 from debate_arena.voice.cloud_voice_agent import (
     CloudVoiceAgent,
 )
+
 from debate_arena.frontend.coaching_view import (
     build_coaching_view_data,
 )
+
 
 # ============================================================
 # PAGE CONFIGURATION
@@ -1088,6 +1093,7 @@ def create_debate_engine(
     user_position: str = USER_POSITION,
     ai_position: str = AI_POSITION,
 ) -> DebateEngine:
+
     state = DebateState(
         topic=topic.strip(),
         user_position=user_position.strip(),
@@ -1160,17 +1166,34 @@ engine: DebateEngine = (
 # THREAD-SAFE VOICE EVENT BRIDGE
 # ============================================================
 
-def create_voice_agent() -> VoiceAgent:
+def create_voice_agent():
     """
-    Create the VoiceAgent and bind it to a LOCAL Queue.
+    Create the appropriate voice agent for the environment.
 
-    The VoiceAgent runs in a background thread.
+    Windows/local:
+        Uses the realtime PyAudio VoiceAgent.
 
-    Therefore the callback functions MUST NOT access
-    st.session_state.
+    Streamlit Cloud:
+        Falls back to CloudVoiceAgent because PyAudio is not
+        available in the cloud environment.
 
-    The queue itself is captured here before the thread starts.
+    The callable(VoiceAgent) check is important because the
+    optional local voice import may resolve to None when
+    PyAudio is unavailable.
     """
+
+    # IMPORTANT:
+    # On Streamlit Cloud, VoiceAgent can be None even when the
+    # import-detection flag is unexpectedly true. In that case
+    # we MUST use CloudVoiceAgent instead of calling None(...).
+    if (
+        not LOCAL_VOICE_AVAILABLE
+        or not callable(VoiceAgent)
+    ):
+        return CloudVoiceAgent(
+            engine=engine,
+            api_key=ASSEMBLYAI_API_KEY,
+        )
 
     event_queue = st.session_state.voice_events
 
@@ -1210,15 +1233,18 @@ def create_voice_agent() -> VoiceAgent:
 
     def on_ai_speaking(text: str) -> None:
         # A new AI rebuttal marks the end of the current user turn.
-        # Clear the live user transcript so it cannot bleed into the next turn.
+        # Clear the live user transcript so it cannot bleed into
+        # the next turn.
         push_event(
             "user_transcript_clear",
             "",
         )
+
         push_event(
             "ai_speaking",
             text,
         )
+
         push_event(
             "voice_visual_state",
             "ai_speaking",
@@ -1271,7 +1297,11 @@ def drain_voice_events() -> None:
 
         if event_type == "status":
             status_text = str(payload)
-            st.session_state.voice_status = status_text
+
+            st.session_state.voice_status = (
+                status_text
+            )
+
             normalized = status_text.lower()
 
             if (
@@ -1279,6 +1309,7 @@ def drain_voice_events() -> None:
                 or "finished" in normalized
             ):
                 st.session_state.latest_user_transcript = ""
+
                 st.session_state.voice_visual_state = (
                     "complete"
                 )
@@ -1322,10 +1353,9 @@ def drain_voice_events() -> None:
             text = str(payload).strip()
 
             if text:
-                # AssemblyAI sends progressively updated transcript text.
-                # Each update is the latest version of the current utterance,
-                # NOT a new sentence to append. Replacing it prevents the
-                # same words from appearing repeatedly in LIVE USER SPEECH.
+                # AssemblyAI sends progressively updated transcript
+                # text. Each update is the latest version of the
+                # current utterance, NOT a new sentence to append.
                 st.session_state.latest_user_transcript = text
 
             st.session_state.voice_visual_state = (
@@ -1338,10 +1368,9 @@ def drain_voice_events() -> None:
         elif event_type == "ai_transcript":
             text = str(payload).strip()
 
-            # A completed AI transcript marks the end of the current
-            # user turn. The live user speech card should represent
-            # only the current argument, not every argument from the
-            # entire debate.
+            # A completed AI transcript marks the end of the
+            # current user turn. The live user speech card
+            # should represent only the current argument.
             st.session_state.latest_user_transcript = ""
 
             if text:
@@ -1353,6 +1382,7 @@ def drain_voice_events() -> None:
             st.session_state.latest_ai_speech = (
                 str(payload).strip()
             )
+
             st.session_state.voice_visual_state = (
                 "ai_speaking"
             )
@@ -2428,6 +2458,7 @@ def render_live_dashboard() -> None:
 
             except Exception as exc:
                 st.session_state.report_generation_in_progress = False
+
                 st.error(
                     f"Could not generate report: {exc}"
                 )
@@ -2717,11 +2748,8 @@ with control_one:
                 "Failed to start"
             )
 
-            import traceback
-
             st.session_state.voice_error = (
-                f"{type(exc).__name__}: {exc}\n\n"
-                f"{traceback.format_exc()}"
+                f"{type(exc).__name__}: {exc}"
             )
 
 
@@ -2745,6 +2773,7 @@ with control_two:
         ):
             try:
                 voice_agent.stop()
+
             except Exception:
                 pass
 
