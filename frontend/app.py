@@ -2717,8 +2717,11 @@ with control_one:
                 "Failed to start"
             )
 
+            import traceback
+
             st.session_state.voice_error = (
-                f"{type(exc).__name__}: {exc}"
+                f"{type(exc).__name__}: {exc}\n\n"
+                f"{traceback.format_exc()}"
             )
 
 
