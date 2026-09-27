@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import html
 import queue
 import textwrap
@@ -11,7 +12,18 @@ from debate_arena.config.settings import ASSEMBLYAI_API_KEY
 from debate_arena.debate.debate_report import DebateReport
 from debate_arena.debate.engine import DebateEngine
 from debate_arena.debate.state import DebateState
-from debate_arena.voice.voice_agent import VoiceAgent
+
+try:
+    from debate_arena.voice.voice_agent import VoiceAgent
+except ModuleNotFoundError as exc:
+    if exc.name != "pyaudio":
+        raise
+    VoiceAgent = None
+    LOCAL_VOICE_AVAILABLE = False
+else:
+    LOCAL_VOICE_AVAILABLE = True
+
+from debate_arena.voice.cloud_voice_agent import CloudVoiceAgent
 from debate_arena.frontend.coaching_view import (
     build_coaching_view_data,
 )
@@ -1126,6 +1138,12 @@ if "latest_ai_transcript" not in st.session_state:
 if "latest_ai_speech" not in st.session_state:
     st.session_state.latest_ai_speech = ""
 
+if "latest_ai_audio" not in st.session_state:
+    st.session_state.latest_ai_audio = None
+
+if "cloud_audio_hash" not in st.session_state:
+    st.session_state.cloud_audio_hash = ""
+
 if "voice_visual_state" not in st.session_state:
     st.session_state.voice_visual_state = "ready"
 
@@ -1151,17 +1169,20 @@ engine: DebateEngine = (
 # THREAD-SAFE VOICE EVENT BRIDGE
 # ============================================================
 
-def create_voice_agent() -> VoiceAgent:
+def create_voice_agent():
     """
-    Create the VoiceAgent and bind it to a LOCAL Queue.
+    Create the correct voice adapter for the current environment.
 
-    The VoiceAgent runs in a background thread.
-
-    Therefore the callback functions MUST NOT access
-    st.session_state.
-
-    The queue itself is captured here before the thread starts.
+    Local Windows runs keep the original realtime PyAudio VoiceAgent.
+    Streamlit Community Cloud uses CloudVoiceAgent, which receives browser
+    recordings through st.audio_input() and returns browser-playable WAV data.
     """
+
+    if not LOCAL_VOICE_AVAILABLE:
+        return CloudVoiceAgent(
+            engine=engine,
+            api_key=ASSEMBLYAI_API_KEY,
+        )
 
     event_queue = st.session_state.voice_events
 
@@ -2052,6 +2073,105 @@ def render_report(
 
 
 # ============================================================
+# CLOUD BROWSER VOICE INPUT
+# ============================================================
+
+def process_cloud_audio_input() -> None:
+    """Process one new browser recording in Streamlit Cloud mode."""
+
+    if LOCAL_VOICE_AVAILABLE:
+        return
+
+    if not st.session_state.voice_started:
+        return
+
+    voice_agent = st.session_state.voice_agent
+
+    if not isinstance(voice_agent, CloudVoiceAgent):
+        return
+
+    if engine.state.is_finished() or not engine.is_user_turn():
+        return
+
+    audio_value = st.audio_input(
+        "🎙️ Record your next argument",
+        key="cloud_voice_input",
+        disabled=False,
+    )
+
+    if audio_value is None:
+        return
+
+    audio_bytes = audio_value.getvalue()
+    if not audio_bytes:
+        return
+
+    audio_hash = hashlib.sha256(audio_bytes).hexdigest()
+
+    # Streamlit reruns the script after widget interaction. Without this
+    # guard, the same recording would be submitted repeatedly.
+    if audio_hash == st.session_state.cloud_audio_hash:
+        return
+
+    st.session_state.cloud_audio_hash = audio_hash
+    st.session_state.voice_error = ""
+    st.session_state.voice_visual_state = "thinking"
+    st.session_state.voice_status = "Transcribing your argument..."
+
+    try:
+        with st.spinner("🎙️ Transcribing and preparing the AI rebuttal..."):
+            result = voice_agent.process_audio(audio_value)
+
+        user_transcript = str(
+            result.get("user_transcript", "")
+        ).strip()
+        ai_rebuttal = str(
+            result.get("ai_transcript", "")
+        ).strip()
+
+        if user_transcript:
+            st.session_state.latest_user_transcript = user_transcript
+
+        if ai_rebuttal:
+            st.session_state.latest_ai_transcript = ai_rebuttal
+            st.session_state.latest_ai_speech = ai_rebuttal
+
+        audio_output = result.get("audio_bytes")
+        if audio_output:
+            st.session_state.latest_ai_audio = audio_output
+
+        debate_finished = bool(
+            result.get("debate_finished", False)
+        )
+
+        if debate_finished:
+            st.session_state.latest_user_transcript = ""
+            st.session_state.voice_visual_state = "complete"
+            st.session_state.voice_status = "Debate complete"
+        else:
+            st.session_state.latest_user_transcript = ""
+            st.session_state.voice_visual_state = "listening"
+            st.session_state.voice_status = "Listening for your next argument"
+
+        if result.get("audio_error"):
+            st.session_state.voice_error = str(
+                result["audio_error"]
+            )
+
+        # A fresh recording must receive a fresh widget value on the next
+        # interaction, so clear the widget's backing hash only through the
+        # next user recording. The current hash remains stored to prevent
+        # duplicate submission during automatic reruns.
+
+    except Exception as exc:
+        st.session_state.voice_visual_state = "error"
+        st.session_state.voice_status = "Voice processing failed"
+        st.session_state.voice_error = (
+            f"{type(exc).__name__}: {exc}"
+        )
+
+
+# ============================================================
 # LIVE DASHBOARD
 # ============================================================
 
@@ -2245,6 +2365,22 @@ def render_live_dashboard() -> None:
     if st.session_state.voice_error:
         st.error(
             st.session_state.voice_error
+        )
+
+    if not LOCAL_VOICE_AVAILABLE and st.session_state.voice_started and not debate_finished:
+        process_cloud_audio_input()
+
+    if st.session_state.latest_ai_audio:
+        render_html(
+            """
+            <div class="section-label">
+                🔊 AI AUDIO RESPONSE
+            </div>
+            """
+        )
+        st.audio(
+            st.session_state.latest_ai_audio,
+            format="audio/wav",
         )
 
     if st.session_state.latest_user_transcript:
@@ -2725,6 +2861,8 @@ with control_one:
             )
 
             st.session_state.latest_ai_speech = ""
+            st.session_state.latest_ai_audio = None
+            st.session_state.cloud_audio_hash = ""
 
             voice_agent.start()
 
@@ -2790,6 +2928,8 @@ with control_two:
         st.session_state.latest_ai_transcript = ""
 
         st.session_state.latest_ai_speech = ""
+        st.session_state.latest_ai_audio = None
+        st.session_state.cloud_audio_hash = ""
 
         st.session_state.voice_visual_state = (
             "ready"
@@ -2812,7 +2952,7 @@ with control_two:
 if not ASSEMBLYAI_API_KEY:
     st.warning(
         "ASSEMBLYAI_API_KEY is not configured. "
-        "Please add it to your .env file."
+        "Please add it to your .env file or Streamlit Cloud secrets."
     )
 
 
