@@ -3,5 +3,3 @@ assemblyai==1.5.5
 google-genai==2.24.0
 python-dotenv==1.2.3
 websockets==16.1.1
-PyAudio==0.2.14
-sounddevice==0.5.6

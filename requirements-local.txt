@@ -1,0 +1,4 @@
+-r requirements.txt
+
+PyAudio==0.2.14
+sounddevice==0.5.6
