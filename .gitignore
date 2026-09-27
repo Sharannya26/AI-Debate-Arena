@@ -1,0 +1,12 @@
+.venv/
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+.streamlit/secrets.toml
+.vscode/
+*.wav
+*.pcm
+m11_4_live_test.txt
+*.egg-info/
+*backup*
