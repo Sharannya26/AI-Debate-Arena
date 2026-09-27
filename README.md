@@ -213,33 +213,60 @@ flowchart TD
 
     U["🎙️ User"]
 
-    U --> A["AssemblyAI<br/>Real-Time Voice Processing"]
+    U -->|"Natural Speech"| A["AssemblyAI<br/>Real-Time Voice"]
 
-    A --> V["Voice Agent"]
+    A -->|"Transcription Events"| V["🎙️ Voice Agent"]
 
-    V --> D["Debate Engine"]
+    V -->|"User Argument"| D["⚔️ Debate Engine"]
 
-    D --> L["Gemini AI"]
+    D <-->|"AI Reasoning & Generation"| G["🤖 Gemini"]
 
-    L --> D
+    D -->|"Authoritative Rebuttal"| V
 
-    D --> R["AI Rebuttal"]
+    V -->|"Voice Response"| A
 
-    R --> V
+    D -->|"Completed Debate"| P["📊 Performance Analysis"]
 
-    V --> A
+    P -->|"Performance Summary"| C["🎯 Coaching Pipeline"]
 
-    D --> P["Performance Analysis"]
+    C -->|"Personalized Insights"| R["📋 Coaching Report"]
 
-    P --> C["Coaching Pipeline"]
-
-    C --> F["Personalized Coaching Report"]
-
-    F --> UI["Streamlit UI"]
+    R --> UI["🖥️ Streamlit UI"]
 
     UI --> U
 ```
 
+### 🔄 High-Level Flow
+
+```text
+🎙️ User speaks
+      ↓
+🔊 AssemblyAI real-time voice processing
+      ↓
+📝 Voice Agent receives transcription
+      ↓
+⚔️ Debate Engine processes the argument
+      ↓
+🤖 Gemini generates the AI response
+      ↓
+⚔️ Debate Engine returns the authoritative rebuttal
+      ↓
+🎙️ Voice Agent delivers the response
+      ↓
+🔄 Next debate round
+      ↓
+🏁 Debate completed
+      ↓
+📊 Performance Analysis
+      ↓
+🎯 Personalized Coaching Pipeline
+      ↓
+📋 Coaching Report
+```
+
+The architecture separates **voice interaction**, **debate logic**, **AI generation**, and **post-debate coaching** into distinct components.
+
+This allows the Debate Engine to remain the authoritative source of debate state while the voice layer handles real-time interaction.
 ---
 
 # 🧩 Core Components
